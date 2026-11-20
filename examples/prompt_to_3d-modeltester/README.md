@@ -20,6 +20,20 @@ Es handelt sich dabei um eine html-datei mit integriertem javascript.   Diese ka
 ## Anwendung
 
 
+Zuerst wird die Verbindung zu openrouter.ai aufgebaut. Dazu muss man einen gültigen key eintragen den man vorher auf seinem account bei openrouter.ai generiert hat (kostet nix). Ausserdem kann man ein Model auswählen doer man belässt es bei der Default-Auswahl welche ausschliesslich Free-models verwendet.
+
+
+
+<p><a href="https://raw.githubusercontent.com/AlexDorsten/oseg-ki-docs/tree/main/examples/prompt_to_3d-modeltester/images/remote_model.jpg" target="_blank"><img src="https://raw.githubusercontent.com/AlexDorsten/oseg-ki-docs/tree/main/examples/prompt_to_3d-modeltester/images/remote_model.jpg" alt="prompt_to_3d-modeltester" style="max-width:100%;"></a></p>
+
+
+Dann kann man einen Begriff eingeben und das Model generiert daraus ein einfaches 3D-objekt und speichert dieses im gleichen lokalen Ordner wo auch die html-datei liegt.
+
+
+<p><a href="https://raw.githubusercontent.com/AlexDorsten/oseg-ki-docs/tree/main/examples/prompt_to_3d-modeltester/images/3d_object.jpg" target="_blank"><img src="https://raw.githubusercontent.com/AlexDorsten/oseg-ki-docs/tree/main/examples/prompt_to_3d-modeltester/images/3d_object.jpg" alt="prompt_to_3d-modeltester" style="max-width:100%;"></a></p>
+
+
+
 
 ## Struktur
 
