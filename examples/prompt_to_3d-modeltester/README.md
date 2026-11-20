@@ -25,9 +25,6 @@ Zuerst wird die Verbindung zu openrouter.ai aufgebaut. Dazu muss man einen gült
 ![User-Interface Model-Auswahl](images/remote_model.jpg)   
 
 
-[//]: #(<p><a href="https://raw.githubusercontent.com/AlexDorsten/oseg-ki-docs/tree/main/examples/prompt_to_3d-modeltester/images/remote_model.jpg" target="_blank"><img src="https://raw.githubusercontent.com/AlexDorsten/oseg-ki-docs/tree/main/examples/prompt_to_3d-modeltester/images/remote_model.jpg" alt="prompt_to_3d-modeltester" style="max-width:100%;"></a></p>)
-
-
 Dann kann man einen Begriff eingeben und das Model generiert daraus ein einfaches 3D-objekt und speichert dieses im gleichen lokalen Ordner wo auch die html-datei liegt.
 
 ![User-Interface Prompt-Eingabe](images/3d_object.jpg)   
