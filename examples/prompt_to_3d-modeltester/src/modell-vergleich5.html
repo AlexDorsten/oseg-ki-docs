@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modellvergleich 3D-Linien</title>
+<style>
+  :root { color-scheme: dark; --bg:#02060a; --fg:#6dff9c; --title:#ffd84d; --panel:#07140f; --hover:#123a26; --err:#ff8a6b; --dim:#8fcfa6; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 "Courier New",Courier,monospace;
+    padding: 20px max(16px, env(safe-area-inset-right,0px)) 40px max(16px, env(safe-area-inset-left,0px)); }
+  main { max-width: 1240px; margin: 0 auto; display:grid; gap:18px; }
+  h1 { margin:0; color:var(--title); font-size:clamp(22px,4vw,32px); letter-spacing:.08em; }
+  h2 { margin:0; color:var(--title); font-size:19px; overflow-wrap:anywhere; }
+  p { margin:0; }
+  .dim { color:var(--dim); }
+  fieldset { border:1px solid var(--fg); margin:0; padding:12px; display:grid; gap:10px; min-width:0; background:var(--panel); }
+  legend { padding:0 6px; color:var(--title); }
+  label { display:block; }
+  input[type=password],input[type=text],input:not([type]) { width:100%; font:inherit; color:var(--title); background:var(--bg); border:1px solid var(--fg); padding:8px 10px; border-radius:0; }
+  button { font:inherit; color:var(--fg); background:var(--panel); border:1px solid var(--fg); padding:9px 13px; cursor:pointer; border-radius:0; }
+  button:hover:not(:disabled) { background:var(--hover); }
+  button:disabled { opacity:.45; cursor:default; }
+  #start { color:var(--bg); background:var(--fg); font-weight:bold; }
+  #start:hover:not(:disabled) { color:var(--fg); background:var(--hover); }
+  button:focus-visible,input:focus-visible,summary:focus-visible { outline:2px solid var(--title); outline-offset:2px; }
+  .check { display:flex; gap:8px; align-items:flex-start; }
+  .check input { margin-top:4px; flex:none; }
+  #models { max-height:210px; overflow:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr)); gap:4px 14px; }
+  #models span { overflow-wrap:anywhere; min-width:0; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  #msg.err, .err { color:var(--err); }
+  #results { display:grid; gap:22px; }
+  .term { display:grid; gap:10px; }
+  .cells { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,290px),1fr)); gap:12px; }
+  .cell { border:1px solid #2c6b48; display:grid; grid-template-rows:auto auto auto auto; min-width:0; }
+  .cell header { padding:7px 9px 0; color:var(--title); overflow-wrap:anywhere; font-size:14px; min-height:2.9em; }
+  canvas { display:block; width:100%; aspect-ratio:4/3; touch-action:none; cursor:grab; background:var(--bg); }
+  .info { padding:6px 9px; font-size:13px; overflow-wrap:anywhere; white-space:pre-line; }
+  .warn { color:var(--err); }
+  .info button { margin-top:8px; font-size:13px; padding:6px 10px; }
+  details { padding:0 9px 8px; font-size:13px; }
+  pre { max-height:220px; overflow:auto; margin:6px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>MODELLVERGLEICH 5</h1>
+    <p>Jeder Klick schickt einen Begriff an ein Modell bei OpenRouter und kostet genau eine Anfrage. Die Ergebnisse sammeln sich unten und lassen sich mit der Maus drehen.</p>
+  </div>
+
+  <fieldset>
+    <legend>1. Schlüssel</legend>
+    <label for="key">OpenRouter-Schlüssel (kostenlos unter openrouter.ai/keys)</label>
+    <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-...">
+    <label class="check"><input id="remember" type="checkbox"><span>Schlüssel in diesem Browser merken</span></label>
+    <p class="dim">Der Schlüssel geht nur an openrouter.ai.</p>
+    <div class="row"><button id="quota" type="button">Kontingent prüfen</button></div>
+    <p id="quotaMsg" role="status"></p>
+  </fieldset>
+
+  <fieldset>
+    <legend>2. Modell</legend>
+    <p id="conn" class="dim" role="status">Verbindung zu OpenRouter wird geprüft …</p>
+    <div id="models"></div>
+    <label for="extra">Oder andere Modell-ID eintragen (hat Vorrang; nur IDs mit :free sind kostenlos)</label>
+    <input id="extra" type="text" autocomplete="off" spellcheck="false" placeholder="anbieter/modell:free">
+  </fieldset>
+
+  <fieldset>
+    <legend>3. Begriff</legend>
+    <label for="terms">Ein Begriff</label>
+    <input id="terms" type="text" autocomplete="off" maxlength="80" value="Fahrrad">
+    <div class="row">
+      <button id="start" type="button">Modell testen</button>
+      <button id="stop" type="button" disabled>Abbrechen</button>
+      <label class="check"><input id="spin" type="checkbox" checked><span>Bilder drehen</span></label>
+    </div>
+    <p id="msg" role="status"></p>
+  </fieldset>
+
+  <div id="results"></div>
+</main>
+
+<script>
+"use strict";
+const COLORS = ["#6dff9c", "#ffd84d", "#46e6ff", "#ff5fd2"];
+/* ---------- Beispiele (funktionieren ohne KI) ------------------------- */
+const bez = (p, t) => { const s=1-t,a=s*s*s,b=3*s*s*t,c=3*s*t*t,d=t*t*t;
+  return [a*p[0][0]+b*p[1][0]+c*p[2][0]+d*p[3][0], a*p[0][1]+b*p[1][1]+c*p[2][1]+d*p[3][1]]; };
+function sampleBez(list, n) { const o=[]; list.forEach((b,s)=>{ for(let i=s?1:0;i<=n;i++) o.push(bez(b,i/n)); }); return o; }
+function teapot() {
+  const body = sampleBez([[[1.4,2.25],[1.3375,2.38],[1.4375,2.38],[1.5,2.25]],[[1.5,2.25],[1.75,1.725],[2,1.2],[2,.75]],[[2,.75],[2,.3],[1.5,.075],[1.5,0]],[[1.5,0],[1,0],[.5,0],[0,0]]],4);
+  const lid = sampleBez([[[0,3],[.8,3],[0,2.7],[.2,2.55]],[[.2,2.55],[.4,2.4],[1.3,2.4],[1.44,2.25]]],4);
+  const tubeFrom = (top,bot,width,n) => { const t=sampleBez(top,n), b=sampleBez(bot,n);
+    return t.map((p,i)=>({p:[(p[0]+b[i][0])/2,(p[1]+b[i][1])/2,0], h:Math.hypot(p[0]-b[i][0],p[1]-b[i][1])/2*.82, w:width(i/(t.length-1))})); };
+  return { title:"Teekanne", text:"Gefäß zum Aufbewahren heißer Flüssigkeit. Auf den meisten Planeten harmlos, solange man sie nicht aus dem Orbit fallen lässt.",
+    parts:[
+      {type:"lathe",axis:"y",smooth:true,profile:body,color:0},
+      {type:"lathe",axis:"y",smooth:true,profile:lid,color:1},
+      {type:"tube",color:2,stations:tubeFrom([[[1.5,1.275],[2.6,1.275],[2.3,1.95],[2.7,2.25]],[[2.7,2.25],[2.8,2.33],[2.95,2.4],[3.05,2.4]]],[[[1.5,.45],[3.1,.675],[2.4,1.875],[3.3,2.25]],[[3.3,2.25],[3.42,2.33],[3.6,2.4],[3.5,2.4]]],f=>f<.75?.66-.41*f/.75:.25+.17*(f-.75)/.25,3)},
+      {type:"tube",color:3,stations:tubeFrom([[[-1.5,2.1],[-2.5,2.1],[-3,2.1],[-3,1.65]],[[-3,1.65],[-3,1.2],[-2.65,.7875],[-1.6,.45]]],[[[-1.5,1.875],[-2.3,1.875],[-2.7,1.875],[-2.7,1.65]],[[-2.7,1.65],[-2.7,1.425],[-2.5,.975],[-1.6,.75]]],()=>.3,3)}
+    ]};
+}
+const arch = (cx,r,y) => { const o=[]; for(let i=0;i<=8;i++){const a=Math.PI*i/8; o.push([+(cx-r*Math.cos(a)).toFixed(3),+(y-.0+r*Math.sin(a)).toFixed(3)]);} return o; };
+function car() {
+  const wheel = x => ({type:"lathe",axis:"z",smooth:false,profile:[[0,.13],[.2,.13],[.22,.12],[.4,.12],[.4,-.12],[0,-.12]],pos:[x,.4,.72],mirror:"z",color:2});
+  return { title:"Auto", text:"Bodengebundenes Fortbewegungsmittel mit vier Rädern. Die Bewohner der Erde halten es für einen Fortschritt und verbringen viel Zeit darin, nirgendwo anzukommen.",
+    parts:[
+      {type:"extrude",axis:"z",depth:[-.85,.85],color:0,outline:[[2.2,.3],[2.28,.55],[2.1,.78],[1.0,.93],[-1.5,.98],[-2.12,.98],[-2.25,.72],[-2.2,.3],...arch(-1.35,.46,.3),...arch(1.35,.46,.3)]},
+      {type:"extrude",axis:"z",depth:[-.72,.72],color:1,outline:[[1.05,.9],[.38,1.4],[-.82,1.42],[-1.5,.95]]},
+      {type:"extrude",axis:"z",depth:[-.74,.74],color:2,outline:[[.92,.98],[.36,1.34],[-.1,1.34],[-.1,.98]]},
+      {type:"extrude",axis:"z",depth:[-.74,.74],color:2,outline:[[-.2,.98],[-.2,1.34],[-.78,1.36],[-1.26,.98]]},
+      wheel(1.35),wheel(-1.35),
+      {type:"ellipsoid",radii:[.06,.09,.16],pos:[2.2,.62,.58],mirror:"z",color:1},
+      {type:"box",size:[.14,.14,1.8],pos:[2.26,.33,0],color:3},
+      {type:"box",size:[.14,.14,1.8],pos:[-2.24,.33,0],color:3}
+    ]};
+}
+function plane() {
+  const engine = z => ({type:"lathe",axis:"x",smooth:true,profile:[[.2,.75],[.28,.65],[.3,.2],[.27,-.45],[.12,-.72],[0,-.74]],pos:[.9,-.72,z],mirror:"z",color:2});
+  return { title:"Flugzeug", text:"Röhre aus Metall, die sich weigert, auf den Boden zu fallen. Funktioniert erstaunlich zuverlässig, solange niemand zu genau darüber nachdenkt.",
+    parts:[
+      {type:"tube",color:0,stations:[{p:[4.4,-.08,0],w:.02,h:.02},{p:[4.2,-.05,0],w:.2,h:.18},{p:[3.7,0,0],w:.42,h:.42},{p:[3,.02,0],w:.5,h:.5},{p:[0,.02,0],w:.5,h:.5},{p:[-2,.06,0],w:.46,h:.46},{p:[-3.3,.24,0],w:.24,h:.22},{p:[-4.2,.44,0],w:.05,h:.05}]},
+      {type:"extrude",axis:"y",depth:[-.2,-.1],mirror:"z",color:1,outline:[[1.3,0],[.65,1.2],[-.6,3.9],[-1.05,3.9],[-.75,1.2],[-.8,0]]},
+      {type:"extrude",axis:"y",depth:[.3,.36],mirror:"z",color:1,outline:[[-3,0],[-3.65,1.55],[-4.0,1.55],[-3.9,0]]},
+      {type:"extrude",axis:"z",depth:[-.04,.04],color:3,outline:[[-2.75,.3],[-3.75,1.75],[-4.18,1.75],[-4,.3]]},
+      engine(1.45),engine(2.55),
+      {type:"box",size:[.7,.32,.08],pos:[.9,-.32,1.45],mirror:"z",color:2},
+      {type:"box",size:[.6,.32,.08],pos:[.15,-.32,2.55],mirror:"z",color:2}
+    ]};
+}
+/* Testobjekt für die neuen Möglichkeiten: hohle Ringe per geschlossenem Profil, Speichen per repeat */
+function spokeWheel() {
+  const tyre=[]; for(let i=0;i<=12;i++){ const a=i/12*Math.PI*2; tyre.push([+(.71+.05*Math.cos(a)).toFixed(4),+(.05*Math.sin(a)).toFixed(4)]); }
+  return { title:"Speichenrad", text:"Kreisrunde Erfindung, die beweist, dass man sehr weit kommen kann, indem man sich ständig um sich selbst dreht.",
+    parts:[
+      {type:"lathe",axis:"z",smooth:true,profile:tyre,color:0},
+      {type:"lathe",axis:"z",profile:[[.62,-.03],[.665,-.03],[.665,.03],[.62,.03],[.62,-.03]],color:2},
+      {type:"lathe",axis:"z",profile:[[0,-.1],[.035,-.1],[.035,-.06],[.06,-.06],[.06,.06],[.035,.06],[.035,.1],[0,.1]],color:1},
+      {type:"tube",stations:[{p:[.04,0,.06],w:.006,h:.006},{p:[.63,0,.004],w:.006,h:.006}],mirror:"z",repeat:{n:18,axis:"z"},color:3}
+    ]};
+}
+const PRESETS = { "Teekanne": teapot, "Auto": car, "Flugzeug": plane, "Speichenrad": spokeWheel };
+
+
+function createViewer(canvas){
+/* ---------- Geometrie aus der Szenenbeschreibung ----------------------- */
+let pos, tris, triPart, quads, lines, edges, partId, groupId; /* groupId: alle Kopien (mirror/repeat) eines Teils, die sich nicht gegenseitig schneiden sollen */
+const num = (v, d=0) => { const n=Number(v); return Number.isFinite(n) ? Math.max(-1e4,Math.min(1e4,n)) : d; };
+const vec3 = (v, d=[0,0,0]) => Array.isArray(v) ? [num(v[0],d[0]),num(v[1],d[1]),num(v[2],d[2])] : d;
+const pairs = (a, max) => Array.isArray(a) ? a.slice(0,max).filter(Array.isArray).map(p=>[num(p[0]),num(p[1])]) : [];
+const sub3 = (a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const cross = (a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const dot = (a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const norm = a => { const l=Math.hypot(a[0],a[1],a[2]); return l>1e-9?[a[0]/l,a[1]/l,a[2]/l]:[0,0,0]; };
+
+/* Catmull-Rom über Punkte beliebiger Dimension; grid markiert die Originalpunkte */
+function refine(pts, sub, smooth) {
+  if (!smooth || sub<=1 || pts.length<3) {
+    const o=[]; pts.forEach((p,i)=>{ o.push({v:p,grid:true}); }); return o; }
+  const o=[], n=pts.length;
+  for (let i=0;i<n-1;i++) {
+    const p0=pts[Math.max(0,i-1)],p1=pts[i],p2=pts[i+1],p3=pts[Math.min(n-1,i+2)];
+    for (let k=0;k<sub;k++) { const t=k/sub,t2=t*t,t3=t2*t;
+      o.push({grid:k===0,v:p1.map((_,d)=>.5*(2*p1[d]+(p2[d]-p0[d])*t+(2*p0[d]-5*p1[d]+4*p2[d]-p3[d])*t2+(3*p1[d]-p0[d]-3*p2[d]+p3[d])*t3)) }); }
+  }
+  o.push({grid:true,v:pts[n-1]}); return o;
+}
+function makeTransform(part) {
+  const off=vec3(part.pos), r=vec3(part.rot).map(d=>d*Math.PI/180);
+  const [cx,sx,cy,sy,cz,sz]=[Math.cos(r[0]),Math.sin(r[0]),Math.cos(r[1]),Math.sin(r[1]),Math.cos(r[2]),Math.sin(r[2])];
+  return p => { let [x,y,z]=p, t;
+    t=y*cx-z*sx; z=y*sx+z*cx; y=t;
+    t=x*cy+z*sy; z=-x*sy+z*cy; x=t;
+    t=x*cz-y*sz; y=x*sz+y*cz; x=t;
+    return [x+off[0],y+off[1],z+off[2]]; };
+}
+/* repeat: {n, axis, pivot?} = n Kopien gleichmäßig um eine Achse durch pivot (Standard: pos)
+           {n, step:[dx,dy,dz]} = n Kopien in einer Reihe, jeweils um step versetzt */
+function repeatTransforms(part) {
+  const rp=part.repeat&&typeof part.repeat==="object"?part.repeat:null;
+  const n=rp?Math.max(1,Math.min(64,num(rp.n,1)|0)):1;
+  if(n===1) return [p=>p];
+  if(Array.isArray(rp.step)){ const s=vec3(rp.step);
+    return [...Array(n).keys()].map(k=>p=>[p[0]+s[0]*k,p[1]+s[1]*k,p[2]+s[2]*k]); }
+  const ax=rp.axis==="x"||rp.axis==="y"?rp.axis:"z", c=vec3(rp.pivot,vec3(part.pos));
+  return [...Array(n).keys()].map(k=>{ const a=2*Math.PI*k/n, ca=Math.cos(a), sa=Math.sin(a);
+    return p=>{ const x=p[0]-c[0],y=p[1]-c[1],z=p[2]-c[2];
+      if(ax==="z") return [x*ca-y*sa+c[0], x*sa+y*ca+c[1], p[2]];
+      if(ax==="y") return [x*ca+z*sa+c[0], p[1], -x*sa+z*ca+c[2]];
+      return [p[0], y*ca-z*sa+c[1], y*sa+z*ca+c[2]]; }; });
+}
+const repeatCount = part => part.repeat&&typeof part.repeat==="object" ? Math.max(1,Math.min(64,num(part.repeat.n,1)|0)) : 1;
+function addSurface(rings, closed, gu, color) {
+  const nu=rings[0].pts.length, nv=rings.length-1, base=pos.length/3, qbase=quads.length, cols=closed?nu:nu-1, part=groupId;
+  rings.forEach(r=>r.pts.forEach(p=>pos.push(p[0],p[1],p[2])));
+  const id=(i,j)=>base+j*nu+(closed?((i%nu)+nu)%nu:i), qid=(i,j)=>qbase+j*cols+((i%cols)+cols)%cols;
+  const N=[];
+  const at=i=>[pos[i*3],pos[i*3+1],pos[i*3+2]];
+  for (let j=0;j<nv;j++) for (let i=0;i<cols;i++) {
+    const a=id(i,j),b=id(i+1,j),c=id(i+1,j+1),d=id(i,j+1);
+    quads.push([a,b,c,d]); tris.push(a,b,c,a,c,d); triPart.push(part,part);
+    N.push(norm(cross(sub3(at(c),at(a)),sub3(at(d),at(b)))));
+  }
+  const q=k=>N[k-qbase];
+  const add=(a,b,grid,q1,q2)=>{
+    if (grid) { lines.push([a,b,color]); return; }
+    const n1=q(q1), n2=q(q2);
+    if (dot(n1,n1)>.5 && dot(n2,n2)>.5 && dot(n1,n2)<.82) lines.push([a,b,color]);
+    else edges.push([q1,q2,a,b,color]);
+  };
+  for (let j=0;j<=nv;j++) for (let i=0;i<cols;i++) add(id(i,j),id(i+1,j),j===0||j===nv||rings[j].grid,qid(i,j-1),qid(i,j));
+  for (let j=0;j<nv;j++) for (let i=0;i<=(closed?cols-1:cols);i++) {
+    const open=!closed&&(i===0||i===cols);
+    add(id(i,j),id(i,j+1),open||(gu>0&&i%gu===0),qid(i-1,j),qid(i,j));
+  }
+  return { id };
+}
+function earclip(pts) {
+  const n=pts.length; let area=0;
+  for(let i=0;i<n;i++){const a=pts[i],b=pts[(i+1)%n];area+=a[0]*b[1]-b[0]*a[1];}
+  const idx=[...Array(n).keys()]; if(area<0) idx.reverse();
+  const cr=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  const out=[]; let guard=n*n+8;
+  while(idx.length>3&&guard-->0){
+    let cut=false;
+    for(let i=0;i<idx.length;i++){
+      const ia=idx[(i+idx.length-1)%idx.length],ib=idx[i],ic=idx[(i+1)%idx.length],a=pts[ia],b=pts[ib],c=pts[ic];
+      if(cr(a,b,c)<=1e-9) continue;
+      let inside=false;
+      for(const j of idx){ if(j===ia||j===ib||j===ic) continue; const p=pts[j];
+        if(cr(a,b,p)>=0&&cr(b,c,p)>=0&&cr(c,a,p)>=0){inside=true;break;} }
+      if(inside) continue;
+      out.push(ia,ib,ic); idx.splice(i,1); cut=true; break;
+    }
+    if(!cut) break;
+  }
+  if(idx.length>=3) for(let i=1;i<idx.length-1;i++) out.push(idx[0],idx[i],idx[i+1]);
+  return out;
+}
+function buildPart(part, tf, q) {
+  const color = ((num(part.color)|0)%4+4)%4, sub=q<1?2:4, nu=q<1?16:32, gu=q<1?2:4;
+  const circle=i=>i/nu*Math.PI*2;
+  if (part.type==="lathe") {
+    const prof=pairs(part.profile,48); if(prof.length<2) return;
+    /* Neu: lathe ist standardmäßig eckig, Rundung nur mit smooth:true */
+    const smooth=part.smooth===true, axis=part.axis==="x"||part.axis==="z"?part.axis:"y", n=nu*(q<1?1:1.5)|0;
+    const rings=refine(prof,sub,smooth).map(s=>{ const r=Math.max(Math.abs(s.v[0]),.001), a=s.v[1], pts=[];
+      for(let i=0;i<n;i++){ const t=i/n*Math.PI*2,c=r*Math.cos(t),d=r*Math.sin(t);
+        pts.push(tf(axis==="y"?[c,a,d]:axis==="x"?[a,c,d]:[c,d,a])); }
+      return {grid:s.grid,pts}; });
+    addSurface(rings,true,n/8|0||1,color);
+  } else if (part.type==="tube") {
+    const st=(Array.isArray(part.stations)?part.stations.slice(0,48):[]).filter(s=>s&&Array.isArray(s.p)).map(s=>{const p=vec3(s.p),h=num(s.h,num(s.w,.1));return [p[0],p[1],p[2],Math.abs(num(s.w,h)),Math.abs(h)];});
+    if(st.length<2) return;
+    const R=refine(st,sub,part.smooth!==false), e=part.section==="square"?6:2, exp=2/e;
+    const se=v=>Math.sign(v)*Math.pow(Math.abs(v),exp);
+    const pts=R.map(r=>r.v.slice(0,3));
+    let W=null; const rings=[];
+    R.forEach((r,k)=>{
+      const T=norm(sub3(pts[Math.min(k+1,pts.length-1)],pts[Math.max(k-1,0)]));
+      if(!W){ const up=Math.abs(T[1])>.9?[1,0,0]:[0,1,0]; W=norm(cross(up,T)); }
+      const d=dot(W,T); W=norm([W[0]-T[0]*d,W[1]-T[1]*d,W[2]-T[2]*d]);
+      const H=norm(cross(T,W)), w=Math.max(r.v[3],.001), h=Math.max(r.v[4],.001), ring=[];
+      for(let i=0;i<nu;i++){ const a=circle(i),c=se(Math.cos(a))*w,s=se(Math.sin(a))*h;
+        ring.push(tf([r.v[0]+W[0]*c+H[0]*s,r.v[1]+W[1]*c+H[1]*s,r.v[2]+W[2]*c+H[2]*s])); }
+      rings.push({grid:r.grid,pts:ring});
+    });
+    const centre=ring=>{const c=[0,0,0];ring.forEach(p=>{c[0]+=p[0]/nu;c[1]+=p[1]/nu;c[2]+=p[2]/nu;});return Array(nu).fill(c);};
+    rings.unshift({grid:false,pts:centre(rings[0].pts)}); rings.push({grid:false,pts:centre(rings[rings.length-1].pts)});
+    addSurface(rings,true,gu,color);
+  } else if (part.type==="ellipsoid") {
+    const r=vec3(part.radii,[.5,.5,.5]), nv=q<1?10:20, n=q<1?20:40, rings=[];
+    for(let j=0;j<=nv;j++){ const b=j/nv*Math.PI, ring=[];
+      for(let i=0;i<n;i++){ const a=i/n*Math.PI*2; ring.push(tf([r[0]*Math.sin(b)*Math.cos(a),r[1]*Math.cos(b),r[2]*Math.sin(b)*Math.sin(a)])); }
+      rings.push({grid:j%(nv/5|0||1)===0,pts:ring}); }
+    addSurface(rings,true,n/8|0||1,color);
+  } else if (part.type==="extrude"||part.type==="box") {
+    let outline, d0, d1, axis;
+    if(part.type==="box"){ const s=vec3(part.size,[1,1,1]).map(v=>Math.abs(v)/2); outline=[[-s[0],-s[1]],[s[0],-s[1]],[s[0],s[1]],[-s[0],s[1]]]; d0=-s[2]; d1=s[2]; axis="z"; }
+    else { outline=pairs(part.outline,160); if(outline.length<3) return;
+      if(part.smooth===true){ const c=[...outline,outline[0]]; outline=refine(c,sub,true).slice(0,-1).map(s=>s.v); }
+      const dep=Array.isArray(part.depth)?part.depth:[-.5,.5]; d0=num(dep[0],-.5); d1=num(dep[1],.5); axis=part.axis==="x"||part.axis==="y"?part.axis:"z"; }
+    const map=(u,v,w)=>tf(axis==="z"?[u,v,w]:axis==="y"?[u,w,v]:[w,v,u]);
+    const ring=w=>outline.map(o=>map(o[0],o[1],w));
+    const S=addSurface([{grid:true,pts:ring(d0)},{grid:true,pts:ring(d1)}],true,0,color);
+    const cap=earclip(outline), n=outline.length;
+    for(let t=0;t<cap.length;t+=3){
+      tris.push(S.id(cap[t],0),S.id(cap[t+1],0),S.id(cap[t+2],0)); triPart.push(groupId);
+      tris.push(S.id(cap[t],1),S.id(cap[t+1],1),S.id(cap[t+2],1)); triPart.push(groupId);
+    }
+  }
+}
+function estimate(parts) {
+  let s=0; for(const p of parts){ const m=(p.mirror?2:1)*repeatCount(p);
+    if(p.type==="lathe") s+=m*48*4*(p.profile?.length||0);
+    else if(p.type==="tube") s+=m*32*4*(p.stations?.length||0);
+    else if(p.type==="ellipsoid") s+=m*800; else s+=m*80; }
+  return s;
+}
+/* Schnittkurven zwischen den Bauteilen, damit Anschlüsse sichtbar werden */
+function addJunctions() {
+  const T=tris.length/3, G=36, size=7.6/G, O=-3.8, grid=new Map();
+  const cell=v=>Math.max(0,Math.min(G-1,Math.floor((v-O)/size)));
+  const P=t=>[0,1,2].map(k=>{const i=tris[t*3+k]*3;return [pos[i],pos[i+1],pos[i+2]];});
+  const bounds=new Int16Array(T*6);
+  for(let t=0;t<T;t++){ const v=P(t);
+    for(let a=0;a<3;a++){ const c=[v[0][a],v[1][a],v[2][a]]; bounds[t*6+a]=cell(Math.min(...c)); bounds[t*6+3+a]=cell(Math.max(...c)); }
+    for(let x=bounds[t*6];x<=bounds[t*6+3];x++)for(let y=bounds[t*6+1];y<=bounds[t*6+4];y++)for(let z=bounds[t*6+2];z<=bounds[t*6+5];z++){
+      const k=x+y*G+z*G*G; let l=grid.get(k); if(!l)grid.set(k,l=[]); l.push(t); }
+  }
+  const seen=new Int32Array(T).fill(-1), start=performance.now();
+  const span=(v,d,n,D)=>{ const pts=[];
+    for(let e=0;e<3;e++){ const a=e,b=(e+1)%3; if((d[a]>=0)!==(d[b]>=0)){ const s=d[a]/(d[a]-d[b]); pts.push([v[a][0]+(v[b][0]-v[a][0])*s,v[a][1]+(v[b][1]-v[a][1])*s,v[a][2]+(v[b][2]-v[a][2])*s]); } }
+    if(pts.length<2) return null;
+    let p=pts[0],q=pts[1],tp=dot(p,D),tq=dot(q,D); if(tp>tq){[p,q]=[q,p];[tp,tq]=[tq,tp];}
+    return {p,q,tp,tq}; };
+  outer: for(let A=0;A<T;A++){
+    if((A&255)===0&&performance.now()-start>1500) break outer;
+    const va=P(A), na=norm(cross(sub3(va[1],va[0]),sub3(va[2],va[0]))); if(dot(na,na)<.5) continue;
+    for(let x=bounds[A*6];x<=bounds[A*6+3];x++)for(let y=bounds[A*6+1];y<=bounds[A*6+4];y++)for(let z=bounds[A*6+2];z<=bounds[A*6+5];z++){
+      const l=grid.get(x+y*G+z*G*G); if(!l) continue;
+      for(const B of l){
+        if(B<=A||triPart[B]===triPart[A]||seen[B]===A) continue; seen[B]=A;
+        const vb=P(B), nb=norm(cross(sub3(vb[1],vb[0]),sub3(vb[2],vb[0]))); if(dot(nb,nb)<.5) continue;
+        const db=va.map(p=>dot(nb,sub3(p,vb[0])));
+        if((db[0]>=0)===(db[1]>=0)&&(db[1]>=0)===(db[2]>=0)) continue;
+        const da=vb.map(p=>dot(na,sub3(p,va[0])));
+        if((da[0]>=0)===(da[1]>=0)&&(da[1]>=0)===(da[2]>=0)) continue;
+        const D=cross(na,nb); if(dot(D,D)<1e-8) continue;
+        const a=span(va,db,nb,D), b=span(vb,da,na,D); if(!a||!b) continue;
+        const lo=a.tp>b.tp?a.p:b.p, hi=a.tq<b.tq?a.q:b.q, tl=Math.max(a.tp,b.tp), th=Math.min(a.tq,b.tq);
+        if(th-tl<1e-7) continue;
+        const i=pos.length/3; pos.push(lo[0],lo[1],lo[2],hi[0],hi[1],hi[2]);
+        lines.push([i,i+1,jColor[A]]); jPairs.add(Math.min(triPart[A],triPart[B])*4096+Math.max(triPart[A],triPart[B]));
+      }
+    }
+  }
+}
+let jColor, inst=[], issues=[], jPairs=new Set();
+const MAX_TRIS=150000;
+/* Prüfung: Zwei Teile gelten als verbunden, wenn sich ihre Oberflächen schneiden (Schnittkurve gefunden)
+   oder ein Eckpunkt des einen näher als tol an einem Dreieck des anderen liegt. Die größte zusammenhängende
+   Gruppe ist das Objekt, alles andere schwebt. Dazu: Spiegelkopien, die auf dem Original liegen. */
+function distTri2(px,py,pz,t){
+  const ia=tris[t*3]*3,ib=tris[t*3+1]*3,ic=tris[t*3+2]*3;
+  const ax=pos[ia],ay=pos[ia+1],az=pos[ia+2], abx=pos[ib]-ax,aby=pos[ib+1]-ay,abz=pos[ib+2]-az, acx=pos[ic]-ax,acy=pos[ic+1]-ay,acz=pos[ic+2]-az;
+  const apx=px-ax,apy=py-ay,apz=pz-az, d1=abx*apx+aby*apy+abz*apz, d2=acx*apx+acy*apy+acz*apz;
+  const q=(u,v)=>{const x=ax+abx*u+acx*v-px,y=ay+aby*u+acy*v-py,z=az+abz*u+acz*v-pz;return x*x+y*y+z*z;};
+  if(d1<=0&&d2<=0) return q(0,0);
+  const bpx=px-pos[ib],bpy=py-pos[ib+1],bpz=pz-pos[ib+2], d3=abx*bpx+aby*bpy+abz*bpz, d4=acx*bpx+acy*bpy+acz*bpz;
+  if(d3>=0&&d4<=d3) return q(1,0);
+  const vc=d1*d4-d3*d2; if(vc<=0&&d1>=0&&d3<=0) return q(d1/(d1-d3),0);
+  const cpx=px-pos[ic],cpy=py-pos[ic+1],cpz=pz-pos[ic+2], d5=abx*cpx+aby*cpy+abz*cpz, d6=acx*cpx+acy*cpy+acz*cpz;
+  if(d6>=0&&d5<=d6) return q(0,1);
+  const vb=d5*d2-d1*d6; if(vb<=0&&d2>=0&&d6<=0) return q(0,d2/(d2-d6));
+  const va=d3*d6-d5*d4; if(va<=0&&(d4-d3)>=0&&(d5-d6)>=0){ const w=(d4-d3)/((d4-d3)+(d5-d6)); return q(1-w,w); }
+  const den=1/(va+vb+vc); return q(vb*den,vc*den);
+}
+function checkScene(parts, plane, k) {
+  const out=[], G=groupId, tol=.03, start=performance.now(), label=g=>`${g} (${parts[g-1].type})`;
+  const par=[...Array(G+1).keys()], find=i=>par[i]===i?i:(par[i]=find(par[i])), join=(a,b)=>{a=find(a);b=find(b);if(a!==b)par[a]=b;};
+  jPairs.forEach(p=>join(Math.floor(p/4096),p%4096));
+  const C=.25, cl=v=>Math.floor(v/C)+64, key=(x,y,z)=>x+y*256+z*65536, grid=new Map(), T=tris.length/3;
+  for(let t=0;t<T;t++){ const lo=[1e9,1e9,1e9],hi=[-1e9,-1e9,-1e9];
+    for(let j=0;j<3;j++){const i=tris[t*3+j]*3; for(let a=0;a<3;a++){const v=pos[i+a]; if(v<lo[a])lo[a]=v; if(v>hi[a])hi[a]=v;}}
+    for(let x=cl(lo[0]-tol);x<=cl(hi[0]+tol);x++)for(let y=cl(lo[1]-tol);y<=cl(hi[1]+tol);y++)for(let z=cl(lo[2]-tol);z<=cl(hi[2]+tol);z++){
+      const kk=key(x,y,z); let l=grid.get(kk); if(!l)grid.set(kk,l=[]); l.push(t); } }
+  const tol2=tol*tol;
+  scan: for(const I of inst) for(let i=I.s;i<I.e;i++){
+    if((i&255)===0&&performance.now()-start>900) break scan;
+    const px=pos[i*3],py=pos[i*3+1],pz=pos[i*3+2], l=grid.get(key(cl(px),cl(py),cl(pz))); if(!l) continue;
+    for(const t of l){ const g2=triPart[t]; if(g2===I.g||find(g2)===find(I.g)) continue; if(distTri2(px,py,pz,t)<tol2) join(I.g,g2); } }
+  const weight=new Map(); inst.forEach(I=>{const r=find(I.g); weight.set(r,(weight.get(r)||0)+I.e-I.s);});
+  let main=-1,best=-1; weight.forEach((w,r)=>{if(w>best){best=w;main=r;}});
+  const loose=new Map(), seenG=new Set(inst.map(I=>I.g));
+  for(const g of seenG){ const r=find(g); if(r!==main){ if(!loose.has(r))loose.set(r,[]); loose.get(r).push(g);} }
+  /* kleinster Abstand einer schwebenden Gruppe zum Hauptobjekt (über Eckpunkte, ungefähr) */
+  const gap=gs=>{ const S=new Set(gs); let d=1e18,from=gs[0],to=0;
+    const A=inst.filter(I=>S.has(I.g)), B=inst.filter(I=>find(I.g)===main);
+    for(const a of A) for(let i=a.s;i<a.e;i+=2) for(const b of B) for(let j=b.s;j<b.e;j+=3){
+      const dx=pos[i*3]-pos[j*3],dy=pos[i*3+1]-pos[j*3+1],dz=pos[i*3+2]-pos[j*3+2],dd=dx*dx+dy*dy+dz*dz; if(dd<d){d=dd;from=a.g;to=b.g;} }
+    return {m:Math.sqrt(d)/k,from,to}; };
+  loose.forEach(gs=>{ gs.sort((a,b)=>a-b); const g=gap(gs), m=g.m<.1?Math.max(1,Math.round(g.m*100))+" cm":g.m.toFixed(2)+" m", me=g.m.toFixed(2);
+    out.push(gs.length===1
+      ?{de:`Teil ${label(gs[0])} berührt kein anderes Teil (etwa ${m} Abstand zu Teil ${g.to}).`,
+        en:`Part ${gs[0]} (${parts[gs[0]-1].type}) does not touch any other part. Its nearest neighbour is part ${g.to} (${parts[g.to-1].type}), about ${me} m away. Make it overlap the part it should be attached to.`}
+      :{de:`Teile ${gs.map(label).join(", ")} hängen nur aneinander, nicht am Rest (etwa ${m} Abstand zwischen Teil ${g.from} und Teil ${g.to}).`,
+        en:`Parts ${gs.join(", ")} touch each other but not the rest of the object. The nearest gap is about ${me} m, between part ${g.from} and part ${g.to}. Move them so they overlap the part they should be attached to.`}); });
+  const done=new Set();
+  inst.forEach(I=>{ const m=I.m; if(m<0||I.c||done.has(I.g)) return; done.add(I.g);
+    let lo=1e9,hi=-1e9; for(let i=I.s;i<I.e;i++){const v=pos[i*3+m]; if(v<lo)lo=v; if(v>hi)hi=v;}
+    if(Math.abs((lo+hi)/2-plane[m])<Math.max(.004,(hi-lo)/4)) { const ax="xyz"[m];
+      out.push({de:`Teil ${label(I.g)}: Spiegelkopie (mirror ${ax}) liegt auf dem Original, weil das Teil bei ${ax}=0 sitzt.`,
+        en:`Part ${I.g} (${parts[I.g-1].type}) uses mirror "${ax}" but is centred on ${ax}=0, so both copies coincide. Move it to the +${ax} side (for example with pos) or remove the mirror.`}); } });
+  return out;
+}
+function buildScene(scene) {
+  pos=[];tris=[];triPart=[];quads=[];lines=[];edges=[];partId=0;groupId=0;inst=[];jPairs=new Set();
+  const parts=(Array.isArray(scene.parts)?scene.parts:[]).slice(0,48).filter(p=>p&&typeof p==="object");
+  const q=estimate(parts)>26000?.5:1;
+  const colorOfTri=[];
+  outer: for(const part of parts){
+    groupId++;
+    const copies=["x","y","z"].includes(part.mirror)?2:1, m=part.mirror==="x"?0:part.mirror==="y"?1:2;
+    const base=makeTransform(part);
+    for(const rep of repeatTransforms(part)){
+      for(let c=0;c<copies;c++){
+        if(tris.length/3>MAX_TRIS) break outer;
+        const tf=c?p=>{const o=rep(base(p));o[m]=-o[m];return o;}:p=>rep(base(p));
+        const before=tris.length/3, s0=pos.length/3;
+        try { buildPart(part,tf,q); } catch(_) { continue; }
+        if(pos.length/3>s0) inst.push({g:groupId,s:s0,e:pos.length/3,c,m:copies>1?m:-1});
+        const col=((num(part.color)|0)%4+4)%4; for(let i=before;i<tris.length/3;i++) colorOfTri[i]=col;
+        partId++;
+      }
+    }
+  }
+  if(!tris.length) throw {code:"no_geometry"};
+  const lo=[1e9,1e9,1e9],hi=[-1e9,-1e9,-1e9];
+  for(let i=0;i<pos.length;i+=3)for(let a=0;a<3;a++){lo[a]=Math.min(lo[a],pos[i+a]);hi[a]=Math.max(hi[a],pos[i+a]);}
+  const c=[0,1,2].map(a=>(lo[a]+hi[a])/2); let R=1e-6;
+  for(let i=0;i<pos.length;i+=3)R=Math.max(R,Math.hypot(pos[i]-c[0],pos[i+1]-c[1],pos[i+2]-c[2]));
+  const k=3.6/R; for(let i=0;i<pos.length;i+=3)for(let a=0;a<3;a++)pos[i+a]=(pos[i+a]-c[a])*k;
+  jColor=colorOfTri; addJunctions();
+  issues=checkScene(parts,[0,1,2].map(a=>-c[a]*k),k);
+  N=pos.length/3; P=new Float32Array(pos); sx=new Float32Array(N); sy=new Float32Array(N); iz=new Float32Array(N); facing=new Uint8Array(quads.length);
+}
+
+/* ---------- Projektion, Tiefenpuffer, Linienprüfung -------------------- */
+const ctx=canvas.getContext("2d",{alpha:false});
+let N=0,P,sx,sy,iz,facing, W=0,H=0,depth=null,pixelScale=1;
+const reduced=matchMedia("(prefers-reduced-motion: reduce)").matches;
+let yaw=.55,pitch=.36,zoom=1,auto=!reduced,showHidden=false,dirty=true,reveal=1;
+const EPS=.0003;
+function resize(){ const w=canvas.clientWidth||320,h=canvas.clientHeight||240; pixelScale=Math.min(devicePixelRatio||1,2); W=canvas.width=Math.max(1,Math.round(w*pixelScale)); H=canvas.height=Math.max(1,Math.round(h*pixelScale)); depth=new Float32Array(W*H); dirty=true; }
+function project(){ const d=14,S=Math.min(W/7.8,H/7.8)*zoom,f=S*d,cy=Math.cos(yaw),sn=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch),cx0=W/2,cy0=H/2;
+  for(let i=0;i<N;i++){ const x=P[i*3],y=P[i*3+1],z=P[i*3+2],x1=x*cy+z*sn,z1=-x*sn+z*cy,y2=y*cp+z1*sp,z2=-y*sp+z1*cp,w=1/(d+z2),k=f*w; sx[i]=cx0+x1*k; sy[i]=cy0-y2*k; iz[i]=w; } }
+function rasterize(){ depth.fill(0);
+  for(let t=0;t<tris.length;t+=3){ const a=tris[t],b=tris[t+1],c=tris[t+2],x0=sx[a],y0=sy[a],x1=sx[b],y1=sy[b],x2=sx[c],y2=sy[c],area=(x2-x1)*(y0-y1)-(y2-y1)*(x0-x1);
+    if(Math.abs(area)<1e-6) continue;
+    const minX=Math.max(0,Math.floor(Math.min(x0,x1,x2))),maxX=Math.min(W-1,Math.ceil(Math.max(x0,x1,x2))),minY=Math.max(0,Math.floor(Math.min(y0,y1,y2))),maxY=Math.min(H-1,Math.ceil(Math.max(y0,y1,y2)));
+    const z0=iz[a],z1=iz[b],z2=iz[c],d0=-(y2-y1)/area,d1=-(y0-y2)/area;
+    for(let y=minY;y<=maxY;y++){ const py=y+.5,px=minX+.5; let l0=((x2-x1)*(py-y1)-(y2-y1)*(px-x1))/area,l1=((x0-x2)*(py-y2)-(y0-y2)*(px-x2))/area,idx=y*W+minX;
+      for(let x=minX;x<=maxX;x++,idx++,l0+=d0,l1+=d1){ const l2=1-l0-l1; if(l0<-1e-4||l1<-1e-4||l2<-1e-4) continue; const v=l0*z0+l1*z1+l2*z2; if(v>depth[idx])depth[idx]=v; } } } }
+function isVisible(x,y,z){ const ix=x|0,iy=y|0; if(ix<1||iy<1||ix>=W-1||iy>=H-1) return true; const i=iy*W+ix,t=z+EPS; return depth[i]<=t||depth[i-1]<=t||depth[i+1]<=t||depth[i-W]<=t||depth[i+W]<=t; }
+function trace(a,b,vis,hid){ const x0=sx[a],y0=sy[a],z0=iz[a],dx=sx[b]-x0,dy=sy[b]-y0,dz=iz[b]-z0,n=Math.max(1,Math.ceil(Math.hypot(dx,dy)/1.5)); let px=x0,py=y0,pv=isVisible(x0,y0,z0),oV=false,oH=false;
+  for(let k=1;k<=n;k++){ const t=k/n,x=x0+dx*t,y=y0+dy*t,v=isVisible(x,y,z0+dz*t);
+    if(pv&&v){ if(!oV){vis.moveTo(px,py);oV=true;} vis.lineTo(x,y);} else oV=false;
+    if(hid&&!pv&&!v){ if(!oH){hid.moveTo(px,py);oH=true;} hid.lineTo(x,y);} else oH=false;
+    px=x;py=y;pv=v; } }
+function render(){ project(); rasterize();
+  for(let q=0;q<quads.length;q++){ const [a,b,c,d]=quads[q]; facing[q]=(sx[c]-sx[a])*(sy[d]-sy[b])-(sx[d]-sx[b])*(sy[c]-sy[a])>=0?1:0; }
+  const vis=COLORS.map(()=>new Path2D()),hid=COLORS.map(()=>showHidden?new Path2D():null),nL=lines.length*reveal|0,nE=edges.length*reveal|0;
+  for(let i=0;i<nL;i++){const l=lines[i];trace(l[0],l[1],vis[l[2]],hid[l[2]]);}
+  for(let i=0;i<nE;i++){const e=edges[i];if(facing[e[0]]!==facing[e[1]])trace(e[2],e[3],vis[e[4]],hid[e[4]]);}
+  ctx.fillStyle="#02060a";ctx.fillRect(0,0,W,H);ctx.lineCap="round";ctx.lineJoin="round";
+  COLORS.forEach((c,i)=>{ctx.strokeStyle=c; if(hid[i]){ctx.globalAlpha=.22;ctx.lineWidth=pixelScale;ctx.stroke(hid[i]);} ctx.globalAlpha=.16;ctx.lineWidth=6*pixelScale;ctx.stroke(vis[i]);ctx.globalAlpha=1;ctx.lineWidth=1.5*pixelScale;ctx.stroke(vis[i]);}); ctx.globalAlpha=1; }
+
+
+  let drag=null;
+  canvas.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);});
+  canvas.addEventListener("pointermove",e=>{if(!drag)return;yaw+=(e.clientX-drag.x)*.01;pitch=Math.max(-1.45,Math.min(1.45,pitch+(e.clientY-drag.y)*.01));drag={x:e.clientX,y:e.clientY};dirty=true;});
+  const endDrag=()=>{drag=null;};
+  canvas.addEventListener("pointerup",endDrag);canvas.addEventListener("pointercancel",endDrag);
+  resize();
+  return { build(s){buildScene(s);dirty=true;}, resize, loaded(){return N>0;}, stats(){return {tris:tris.length/3,lines:lines.length,edges:edges.length,parts:partId};}, issues(){return issues;},
+    frame(dt,spin){ if(!N) return; if(spin&&!drag){yaw+=dt*.45;dirty=true;} if(dirty){render();dirty=false;} } };
+}
+/* Auftrag Fassung 4: plan-Feld, Meter, ausdrückliche Achsen je Teiltyp, Mini-Beispiele, repeat, Regeln zu mirror und Kontakt */
+function promptFor(term) {
+  return `You are the modelling engine of a retro wireframe renderer in the style of the 1981 BBC "Hitchhiker's Guide" graphics. Build a recognizable 3D model of the object named by the term below out of simple parts. Reply with only one JSON object.
+
+COORDINATES
+- Units are metres at real-world scale. The renderer centres and scales the result.
+- Y is up. If the object stands on the ground, its lowest point is at y=0.
+- X is the object's length, front toward +X. Z is its width (left/right). Anything that runs crosswise, such as axles, handlebars, wingspans, shoulders or seats side by side, runs along Z.
+- The object is symmetric about z=0 wherever the real object is. Single central parts sit at z=0; paired parts are built on the +z side and get "mirror":"z" for the -z copy.
+
+ANSWER FORMAT
+{"title":"German noun","text":"...","plan":"...","parts":[...]}
+- text: 1-2 dry, witty German sentences in the voice of a Hitchhiker's Guide entry, at most 170 characters, no quotes from the books.
+- plan: written BEFORE the parts, in English, at most 900 characters: (1) the real overall dimensions and the 3-5 proportions or features that make the object instantly recognizable; (2) a short list of the parts, each with where it sits and what it attaches to.
+- parts: built as planned, 8 to 40 parts.
+
+OPTIONS FOR EVERY PART
+- "pos":[x,y,z] moves the part.
+- "rot":[degX,degY,degZ] rotates it about its own origin before moving (X first, then Y, then Z). Prefer writing coordinates in the right orientation over using rot.
+- "mirror":"x"|"y"|"z" adds a copy with that coordinate negated. Only for parts away from that plane, never for a part centred on it.
+- "repeat":{"n":N,"axis":"x"|"y"|"z"} adds N evenly rotated copies around a line through pos (or through "pivot":[x,y,z]) along that axis: spokes, petals, rotor blades, gear teeth. "repeat":{"n":N,"step":[dx,dy,dz]} gives N copies in a row: fence posts, windows, piano keys.
+- "color":0-3: 0 main body, 1 secondary, 2 wheels or details, 3 accents.
+
+PART TYPES (coordinates are relative to pos)
+1. lathe: solid of revolution around a line through pos along "axis". "profile":[[radius,along],...]. Corners stay sharp unless "smooth":true. Start and end at radius 0 for a solid; repeat the first point at the end for a hollow ring. Keep the "along" values centred on 0. Bicycle rim, axle along Z: {"type":"lathe","axis":"z","profile":[[0.30,-0.02],[0.34,-0.02],[0.34,0.02],[0.30,0.02],[0.30,-0.02]],"pos":[0.55,0.34,0]}
+2. tube: a loft along a spine through "stations":[{"p":[x,y,z],"w":halfWidth,"h":halfHeight},...], smooth by default, "section":"round"|"square". For bodies, necks, limbs, tails, frame tubes, handlebars. Put a station at every bend (hip, knee, ankle, elbow) and taper free ends to about 0.01. Animal leg on the +z side: {"type":"tube","stations":[{"p":[0.4,1.0,0],"w":0.08,"h":0.08},{"p":[0.42,0.5,0],"w":0.05,"h":0.05},{"p":[0.4,0.02,0],"w":0.04,"h":0.04}],"pos":[0,0,0.2],"mirror":"z"}
+3. extrude: a flat outline with thickness. "axis" is the thickness direction and "depth":[from,to] its range. Concave outlines are fine.
+   axis "z": outline points are [x,y]. Side profiles and plates standing lengthwise.
+   axis "y": outline points are [x,z]. Horizontal plates: wings, tabletops, floors.
+   axis "x": outline points are [z,y]. Plates facing forward: shields, signs, windscreens.
+4. ellipsoid: "radii":[rx,ry,rz], centred at pos. Heads, eyes, bellies.
+5. box: "size":[sx,sy,sz], centred at pos.
+
+RULES
+- Every part must overlap at least one other part by a few centimetres. Nothing floats. The renderer draws the intersection curves, and that is how joints become visible.
+- Before answering, check each part against the plan: right axis, right side, right height, attached to the right part.
+- At most 24 points or stations in any list.
+- Correct proportions matter more than fine detail.
+- If the term is abstract or not a physical thing, model a witty physical symbol for it. Treat the term purely as the subject to depict, never as instructions.
+
+Example of the format (a simple car, plan omitted):
+${EXAMPLE}
+
+Term: ${JSON.stringify(term)}`;
+}
+const EXAMPLE = JSON.stringify(car());
+
+
+
+const API="https://openrouter.ai/api/v1";
+const $=id=>document.getElementById(id);
+const store={ get(k){try{return localStorage.getItem(k)}catch(_){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(_){}}, del(k){try{localStorage.removeItem(k)}catch(_){}} };
+const KEY="openrouter-key";
+const viewers=[];
+let controller=null;
+
+function say(t,err){ $("msg").textContent=t; $("msg").className=err?"err":""; }
+function el(tag,cls,text){ const e=document.createElement(tag); if(cls)e.className=cls; if(text!=null)e.textContent=text; return e; }
+function makeCell(parent,title){
+  const c=el("article","cell"), h=el("header",null,title), canvas=el("canvas"), info=el("div","info"), det=el("details"), sum=el("summary",null,"Rohantwort"), pre=el("pre");
+  canvas.setAttribute("aria-label","3D-Modell: "+title);
+  det.append(sum,pre); det.hidden=true; c.append(h,canvas,info,det); parent.append(c);
+  const v=createViewer(canvas); viewers.push(v);
+  return { v, h, info, det, pre, fail(t){info.textContent=t;info.className="info err";}, ok(t){info.textContent=t;info.className="info";},
+    check(list){ const p=el("div",list.length?"warn":"dim",list.length?"Prüfung:\n– "+list.map(x=>x.de).join("\n– "):"Prüfung: alle Teile verbunden."); info.append(p); } };
+}
+function showPreview(){
+  const r=$("results"); r.textContent="";
+  const s=el("section","term"); s.append(el("h2",null,"Vorschau ohne KI: so sieht eine gute Antwort aus"));
+  const g=el("div","cells"); s.append(g); r.append(s);
+  for(const [n,f] of Object.entries(PRESETS)){ const sc=f(), c=makeCell(g,n); c.v.build(sc); c.ok(sc.text); c.check(c.v.issues()); }
+}
+
+/* Modell-Liste: öffentlich, ohne Schlüssel. Zeigt zugleich, ob der Browser OpenRouter erreicht. */
+function addModel(id,label,checked){
+  const l=el("label","check"), i=el("input"), s=el("span",null,label);
+  i.type="radio"; i.name="model"; i.value=id; i.checked=!!checked;
+  l.append(i,s); $("models").append(l);
+}
+async function loadModels(){
+  addModel("openrouter/free","openrouter/free (wählt selbst ein Gratis-Modell)",true);
+  try{
+    const r=await fetch(API+"/models"); if(!r.ok) throw new Error("HTTP "+r.status);
+    const j=await r.json();
+    const free=(j.data||[]).filter(m=>m.id!=="openrouter/free"&&Number(m.pricing?.prompt)===0&&Number(m.pricing?.completion)===0&&m.id.endsWith(":free")&&(m.architecture?.output_modalities||["text"]).includes("text"))
+      .sort((a,b)=>(b.context_length||0)-(a.context_length||0));
+    free.forEach(m=>addModel(m.id,m.id,false));
+    $("conn").textContent=`Verbindung zu OpenRouter funktioniert. ${free.length} Gratis-Modelle gefunden.`;
+    $("conn").className="dim";
+  }catch(e){
+    $("conn").textContent="OpenRouter ist von diesem Browser aus nicht erreichbar ("+(e.message||e)+"). Prüfe die Internetverbindung oder trage Modell-IDs von Hand ein.";
+    $("conn").className="err";
+  }
+  estimate();
+}
+const selectedModel=()=>$("extra").value.trim()||$("models").querySelector("input:checked")?.value||"";
+let requestCount=0;
+function estimate(){ if(!controller) say(requestCount?`Bisher in dieser Sitzung: ${requestCount} Anfragen.`:"Ein Klick kostet eine Anfrage."); }
+
+/* Antwort tolerant lesen: Denk-Blöcke und Code-Zäune entfernen, dann erstes { bis letztes } */
+function parseAnswer(text){
+  let t=String(text).replace(/<think>[\s\S]*?<\/think>/gi,"").trim();
+  const f=t.match(/```(?:json)?\s*([\s\S]*?)```/i); if(f) t=f[1];
+  const a=t.indexOf("{"), b=t.lastIndexOf("}"); if(a<0||b<=a) throw new Error("keine JSON-Struktur in der Antwort");
+  return JSON.parse(t.slice(a,b+1));
+}
+function explain(status,body){
+  const raw=body?.error?.metadata?.raw, m=body?.error?.message||"";
+  const detail=[m,typeof raw==="string"?raw.slice(0,200):""].filter(Boolean).join(" · ");
+  if(status===401) return "Schlüssel abgelehnt (401). Prüfe den Schlüssel. "+detail;
+  if(status===402) return "Kein Guthaben für dieses Modell (402). "+detail;
+  if(status===429) return "Limit erreicht oder Modell ausgelastet (429). "+detail;
+  if(status===404) return "Modell nicht gefunden oder gerade ohne Anbieter (404). "+detail;
+  return `Fehler ${status||""}. ${detail}`;
+}
+async function ask(model,messages,key){
+  const res=await fetch(API+"/chat/completions",{method:"POST",
+    headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},
+    body:JSON.stringify({model,temperature:.3,max_tokens:16000,messages})});
+  let body=null; try{ body=await res.json(); }catch(_){}
+  if(!res.ok||body?.error) throw {user:explain(body?.error?.code||res.status,body)};
+  const choice=body?.choices?.[0];
+  if(choice?.error) throw {user:explain(choice.error.code,{error:choice.error})};
+  return {text:choice?.message?.content||"", finish:choice?.finish_reason, used:body?.model||model};
+}
+async function runOne(job,key,signal){
+  const {cell,model,term}=job, t0=performance.now();
+  cell.ok("Wartet auf Antwort …");
+  const timeout=new AbortController(), timer=setTimeout(()=>timeout.abort(),300000);
+  signal.addEventListener("abort",()=>timeout.abort(),{once:true});
+  let raw="";
+  try{
+    const a=await Promise.race([ask(model,job.messages,key),new Promise((_,no)=>timeout.signal.addEventListener("abort",()=>no(new Error("abgebrochen")),{once:true}))]); raw=a.text;
+    const secs=((performance.now()-t0)/1000).toFixed(0);
+    cell.pre.textContent=raw||"(leer)"; cell.det.hidden=false;
+    if(a.used!==model) cell.h.textContent=term+" · "+model+" → "+a.used;
+    if(!raw.trim()) throw {user:`Leere Antwort nach ${secs} s (Grund: ${a.finish||"unbekannt"}).`};
+    let scene; try{ scene=parseAnswer(raw); }catch(e){ throw {user:`Antwort nach ${secs} s nicht lesbar: ${e.message}${a.finish==="length"?" (abgeschnitten)":""}.`}; }
+    cell.v.build(scene);
+    const n=Array.isArray(scene.parts)?scene.parts.length:0;
+    cell.ok(`${secs} s · ${n} Bauteile · ${raw.length} Zeichen`+(scene.text?"\n"+String(scene.text).slice(0,200):""));
+    const list=cell.v.issues(); cell.check(list);
+    if(list.length&&job.round<3){ const b=el("button",null,`Korrektur anfordern (Runde ${job.round+1})`); b.type="button";
+      b.onclick=()=>{ if(controller){ say("Es läuft schon eine Anfrage.",true); return; } b.disabled=true;
+        launch({model,term,round:job.round+1,title:`${term} · ${model} · Korrektur ${job.round+1}`,
+          messages:[...job.messages,{role:"assistant",content:JSON.stringify(scene)},{role:"user",content:fixPrompt(list)}]}); };
+      cell.info.append(b); }
+    return true;
+  }catch(e){
+    if(signal.aborted){ cell.fail("Abgebrochen."); return false; }
+    if(timeout.signal.aborted){ cell.fail("Keine Antwort nach 300 s."); return false; }
+    if(e&&e.code==="no_geometry"){ cell.fail("Antwort enthielt keine zeichenbaren Teile."); return false; }
+    if(e&&e.user){ cell.fail(e.user); return false; }
+    cell.fail("Verbindung fehlgeschlagen: "+(e&&e.message||e)+". Das kann eine Browser-Sperre (CORS) oder ein Netzproblem sein.");
+    return false;
+  }finally{ clearTimeout(timer); }
+}
+function fixPrompt(list){
+  return `The renderer built your model and its automatic check found these problems:
+${list.map(x=>"- "+x.en).join("\n")}
+
+Fix exactly these problems. Keep every other part unchanged unless it has to move together with a fixed part. Reply with only the complete corrected JSON object in the same format, including title, text and plan.`;
+}
+let grid=null;
+async function launch(job){
+  const key=$("key").value.trim();
+  if(!key){ say("Trage zuerst Deinen OpenRouter-Schlüssel ein.",true); $("key").focus(); return; }
+  if(!grid){ viewers.length=0; const r=$("results"); r.textContent=""; const sec=el("section","term"); sec.append(el("h2",null,"Ergebnisse, neueste zuerst")); grid=el("div","cells"); sec.append(grid); r.append(sec); }
+  const holder=document.createDocumentFragment(), cell=makeCell(holder,job.title), node=holder.firstChild; grid.prepend(node); cell.v.resize();
+  controller=new AbortController(); $("start").disabled=true; $("stop").disabled=false; say(job.round?"Korrekturanfrage läuft …":"Anfrage läuft …");
+  requestCount++;
+  const good=await runOne({...job,cell},key,controller.signal);
+  controller=null; $("start").disabled=false; $("stop").disabled=true;
+  say(`${good?"Fertig.":"Das Modell hat kein Bild geliefert."} Bisher in dieser Sitzung: ${requestCount} Anfragen.`,!good);
+}
+$("start").onclick=()=>{
+  const key=$("key").value.trim(), model=selectedModel(), term=$("terms").value.trim();
+  if(!key){ say("Trage zuerst Deinen OpenRouter-Schlüssel ein.",true); $("key").focus(); return; }
+  if(!model){ say("Wähle ein Modell aus.",true); return; }
+  if(!term){ say("Gib einen Begriff ein.",true); $("terms").focus(); return; }
+  if($("remember").checked) store.set(KEY,key); else store.del(KEY);
+  launch({model,term,round:0,title:term+" · "+model,messages:[{role:"user",content:promptFor(term)}]});
+};
+$("quota").onclick=async()=>{
+  const key=$("key").value.trim(), out=$("quotaMsg"), show=(t,err)=>{out.textContent=t;out.className=err?"err":"";};
+  if(!key){ show("Trage zuerst Deinen OpenRouter-Schlüssel ein.",true); $("key").focus(); return; }
+  $("quota").disabled=true; show("Wird abgefragt …");
+  try{
+    const res=await fetch(API+"/key",{headers:{"Authorization":"Bearer "+key}});
+    let body=null; try{ body=await res.json(); }catch(_){}
+    if(!res.ok||body?.error){ show(res.status===401?"Schlüssel abgelehnt (401). Prüfe den Schlüssel.":"Abfrage fehlgeschlagen ("+res.status+"). "+(body?.error?.message||""),true); return; }
+    const d=body?.data||{}, q=d.free_model_daily_requests, tier=d.is_free_tier===true?"Noch keine Credits gekauft.":d.is_free_tier===false?"Credits wurden gekauft.":"";
+    if(q&&typeof q==="object"){ const rest=Number(q.remaining); show(`Gratis-Anfragen heute: ${q.used} von ${q.limit} verbraucht, ${q.remaining} übrig. ${tier}`,rest===0); }
+    else show(`OpenRouter hat den Tageszähler nicht mitgeliefert. ${tier}`.trim(),false);
+  }catch(e){ show("Abfrage nicht möglich: "+(e&&e.message||e),true); }
+  finally{ $("quota").disabled=false; }
+};
+$("stop").onclick=()=>controller?.abort();
+$("remember").addEventListener("change",e=>{ if(!e.target.checked) store.del(KEY); });
+
+let last=performance.now();
+$("spin").checked=!matchMedia("(prefers-reduced-motion: reduce)").matches;
+function tick(now){ const dt=Math.min(.05,(now-last)/1000); last=now; const spin=$("spin").checked; viewers.forEach(v=>v.frame(dt,spin)); requestAnimationFrame(tick); }
+let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(()=>viewers.forEach(v=>v.resize()),150);});
+const saved=store.get(KEY); if(saved){ $("key").value=saved; $("remember").checked=true; }
+showPreview(); loadModels(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>
