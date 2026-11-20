@@ -1,0 +1,21 @@
+# Lokale Arbeitsnotizen und Betriebssystemdateien
+.scratch/
+/oseg-ki-auswahl-meinungen.md
+.DS_Store
+._*
+Thumbs.db
+
+# Zugangsdaten und persoenliche Konfiguration
+.env
+.env.*
+!.env.example
+secrets/
+ifm-api-key
+/opencode.json
+/opencode.jsonc
+/.opencode/opencode.json
+/.opencode/opencode.jsonc
+
+# Editor-Sicherungen
+*.swp
+*~
